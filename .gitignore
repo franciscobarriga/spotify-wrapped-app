@@ -1,7 +1,6 @@
-# Data files (too large for git)
-*.csv
+# Large data files (except demo data)
 *.json
-Spotify\ Extended\ Streaming\ History/
+Spotify Extended Streaming History/
 master_music_library.csv
 
 # Python

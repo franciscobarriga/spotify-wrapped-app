@@ -6,11 +6,8 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from collections import Counter
-import glob
 import json
-import hashlib
 import os
-import tempfile
 
 # Page config
 st.set_page_config(
@@ -20,12 +17,21 @@ st.set_page_config(
 )
 
 @st.cache_data
+def load_demo_data():
+    """Load pre-processed demo data"""
+    df = pd.read_csv("my_spotify_data.csv")
+    df['ts'] = pd.to_datetime(df['ts'])
+    df['date'] = pd.to_datetime(df['date']).dt.date
+    return df
+
+@st.cache_data
+def load_demo_library():
+    """Load music library"""
+    return pd.read_csv("music_library.csv", low_memory=False)
+
 def load_data_from_upload(uploaded_files):
     """Load and process Spotify streaming history from uploaded files"""
-
     all_data = []
-
-    # Handle both uploaded files and local files
     for uploaded_file in uploaded_files:
         content = uploaded_file.getvalue().decode('utf-8')
         for obj in content.split(']['):
@@ -40,17 +46,13 @@ def load_data_from_upload(uploaded_files):
                 pass
 
     df = pd.DataFrame(all_data)
-
-    # Parse timestamp
     df['ts'] = pd.to_datetime(df['ts'])
     df['year'] = df['ts'].dt.year
     df['month'] = df['ts'].dt.month
     df['hour'] = df['ts'].dt.hour
     df['day_of_week'] = df['ts'].dt.dayofweek
     df['date'] = df['ts'].dt.date
-    df['year_month'] = df['ts'].dt.to_period('M')
 
-    # Time of day
     def get_time_bucket(hour):
         if 5 <= hour < 12:
             return 'Morning'
@@ -63,171 +65,83 @@ def load_data_from_upload(uploaded_files):
 
     df['time_bucket'] = df['hour'].apply(get_time_bucket)
     df['is_weekend'] = df['day_of_week'].isin([5, 6])
-
-    # Platform
     df['is_mobile'] = df['platform'].str.contains('iOS|Android', case=False, na=False)
-    df['is_desktop'] = df['platform'].str.contains('Mac|Windows|Linux', case=False, na=False)
-
-    # Minutes played
     df['minutes_played'] = df['ms_played'] / 1000 / 60
-
-    # Completion ratio
-    df['completion_ratio'] = df['ms_played'] / 180000  # Assuming 3 min avg song
-
-    # Clean track/artist names
     df['track_name'] = df['master_metadata_track_name'].fillna('Unknown')
     df['artist_name'] = df['master_metadata_album_artist_name'].fillna('Unknown')
     df['album_name'] = df['master_metadata_album_album_name'].fillna('Unknown')
 
     return df
 
-
-@st.cache_data
-def load_data():
-    """Load and process Spotify streaming history from local files"""
-
-    all_data = []
-
-    # Read all JSON files
-    spotify_dir = "Spotify Extended Streaming History"
-    for f in sorted(glob.glob(f"{spotify_dir}/Streaming_History_Audio_*.json")):
-        with open(f) as file:
-            content = file.read()
-            for obj in content.split(']['):
-                try:
-                    if not obj.startswith('['):
-                        obj = '[' + obj
-                    if not obj.endswith(']'):
-                        obj = obj + ']'
-                    data = json.loads(obj)
-                    all_data.extend(data)
-                except:
-                    pass
-
-    df = pd.DataFrame(all_data)
-
-    # Parse timestamp
-    df['ts'] = pd.to_datetime(df['ts'])
-    df['year'] = df['ts'].dt.year
-    df['month'] = df['ts'].dt.month
-    df['hour'] = df['ts'].dt.hour
-    df['day_of_week'] = df['ts'].dt.dayofweek
-    df['date'] = df['ts'].dt.date
-    df['year_month'] = df['ts'].dt.to_period('M')
-
-    # Time of day
-    def get_time_bucket(hour):
-        if 5 <= hour < 12:
-            return 'Morning'
-        elif 12 <= hour < 17:
-            return 'Afternoon'
-        elif 17 <= hour < 21:
-            return 'Evening'
-        else:
-            return 'Night'
-
-    df['time_bucket'] = df['hour'].apply(get_time_bucket)
-    df['is_weekend'] = df['day_of_week'].isin([5, 6])
-
-    # Platform
-    df['is_mobile'] = df['platform'].str.contains('iOS|Android', case=False, na=False)
-    df['is_desktop'] = df['platform'].str.contains('Mac|Windows|Linux', case=False, na=False)
-
-    # Minutes played
-    df['minutes_played'] = df['ms_played'] / 1000 / 60
-
-    # Completion ratio
-    df['completion_ratio'] = df['ms_played'] / 180000  # Assuming 3 min avg song
-
-    # Clean track/artist names
-    df['track_name'] = df['master_metadata_track_name'].fillna('Unknown')
-    df['artist_name'] = df['master_metadata_album_artist_name'].fillna('Unknown')
-    df['album_name'] = df['master_metadata_album_album_name'].fillna('Unknown')
-
-    return df
-
-    return df
-
-@st.cache_data
 def get_genre_data(df, library_df):
     """Match streaming history with genre data"""
+    if library_df.empty:
+        return df.copy()
 
-    # Create match keys
     df['match_key'] = (df['artist_name'].str.lower().str.strip() + '||' +
                        df['track_name'].str.lower().str.strip())
-
     library_df['match_key'] = (library_df['artist_name'].str.lower().str.strip() + '||' +
                                library_df['track_name'].str.lower().str.strip())
 
-    # Keep unique tracks per artist for matching
     library_unique = library_df.drop_duplicates(subset=['match_key'])
-
-    # Merge
     merged = df.merge(library_unique[['match_key', 'genre', 'danceability', 'energy',
                                        'tempo', 'valence', 'acousticness', 'popularity']],
                       on='match_key', how='left')
-
     return merged
 
 # Main app
 st.title("🎧 My Spotify Wrapped")
 
-# Sidebar for navigation
-page = st.sidebar.radio("Go to", ["Overview", "Explore", "For You"])
+# Mode selection
+st.sidebar.header("📁 Choose Data Source")
 
-# File upload section
-st.sidebar.header("📁 Upload Your Data")
-
-st.sidebar.markdown("""
-**Required:**
-1. Download your [Spotify Extended Streaming History](https://www.spotify.com/account/privacy/)
-2. Upload the `Streaming_History_Audio_*.json` files
-
-**Optional:**
-- Upload `master_music_library.csv` for genre data
-""")
-
-uploaded_files = st.sidebar.file_uploader(
-    "Upload Spotify JSON files",
-    type="json",
-    accept_multiple_files=True
+mode = st.sidebar.radio(
+    "Select mode:",
+    ["🎤 Demo (my data)", "📤 Upload your own data"]
 )
 
-library_file = st.sidebar.file_uploader(
-    "Upload music library (optional, for genres)",
-    type="csv"
-)
-
-if not uploaded_files:
-    st.info("👈 Please upload your Spotify Extended Streaming History JSON files to get started!")
-    st.markdown("""
-    ### How to get your data:
-    1. Go to [Spotify Privacy Settings](https://www.spotify.com/account/privacy/)
-    2. Request your "Extended Streaming History"
-    3. Wait for the email (can take a few days)
-    4. Download and unzip the files
-    5. Upload the `Streaming_History_Audio_*.json` files here
-    """)
-    st.stop()
-
-# Load data
-with st.spinner("Processing your listening data..."):
-    df = load_data_from_upload(uploaded_files)
-
-    if library_file:
-        library_df = pd.read_csv(library_file)
+if mode == "🎤 Demo (my data)":
+    # Check if demo files exist
+    if os.path.exists("my_spotify_data.csv"):
+        with st.spinner("Loading demo data..."):
+            df = load_demo_data()
+            library_df = load_demo_library()
+            df_enriched = get_genre_data(df, library_df)
     else:
-        # Use a small built-in sample or skip genre enrichment
-        library_df = pd.DataFrame()
+        st.error("Demo data not found. Please use upload mode.")
+        st.stop()
+else:
+    st.sidebar.header("Upload Your Data")
 
-    if df is None or len(df) == 0:
-        st.error("No data loaded. Please check your files.")
+    uploaded_files = st.sidebar.file_uploader(
+        "Upload Spotify JSON files",
+        type=['json'],
+        accept_multiple_files=True
+    )
+
+    library_file = st.sidebar.file_uploader(
+        "Upload music library CSV (optional)",
+        type=['csv']
+    )
+
+    if not uploaded_files:
+        st.info("👈 Please upload your Spotify Extended Streaming History JSON files to get started!")
+        st.markdown("""
+        ### How to get your Spotify data:
+        1. Go to [Spotify Privacy Settings](https://www.spotify.com/account/privacy/)
+        2. Request your "Extended streaming history"
+        3. Download and unzip the JSON files
+        4. Upload them here
+        """)
         st.stop()
 
-    if not library_df.empty:
+    with st.spinner("Processing your listening data..."):
+        df = load_data_from_upload(uploaded_files)
+        library_df = pd.read_csv(library_file) if library_file else pd.DataFrame()
         df_enriched = get_genre_data(df, library_df)
-    else:
-        df_enriched = df.copy()
+
+# Sidebar for navigation
+page = st.sidebar.radio("Go to", ["Overview", "Explore", "For You"])
 
 if page == "Overview":
     st.header("📊 Your Listening Overview")
@@ -237,7 +151,6 @@ if page == "Overview":
     total_plays = len(df)
     unique_artists = df['artist_name'].nunique()
     unique_tracks = df['track_name'].nunique()
-    date_range = f"{df['date'].min()} to {df['date'].max()}"
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Total Hours", f"{total_hours:,.0f}")
@@ -245,9 +158,8 @@ if page == "Overview":
     col3.metric("Unique Artists", f"{unique_artists:,}")
     col4.metric("Unique Tracks", f"{unique_tracks:,}")
 
-    st.caption(f"📅 Listening history: {date_range}")
+    st.caption(f"📅 Listening history: {df['date'].min()} to {df['date'].max()}")
 
-    # Charts
     st.divider()
 
     col1, col2 = st.columns(2)
@@ -315,46 +227,45 @@ if page == "Overview":
 
     st.divider()
 
-    # Genre distribution (from enriched data)
-    st.subheader("🎸 Genre Distribution")
+    # Genre distribution
+    if 'genre' in df_enriched.columns and df_enriched['genre'].notna().any():
+        st.subheader("🎸 Genre Distribution")
 
-    col1, col2 = st.columns(2)
+        col1, col2 = st.columns(2)
 
-    with col1:
-        genre_plays = df_enriched[df_enriched['genre'].notna()].groupby('genre')['minutes_played'].sum()
-        genre_plays = genre_plays.sort_values(ascending=False).head(10)
-        fig_genre = px.bar(
-            y=genre_plays.index[::-1],
-            x=genre_plays.values[::-1],
-            orientation='h',
-            labels={'x': 'Minutes', 'y': 'Genre'},
-            color=genre_plays.values[::-1],
-            color_continuous_scale='oranges'
-        )
-        fig_genre.update_layout(showlegend=False)
-        st.plotly_chart(fig_genre, use_container_width=True)
+        with col1:
+            genre_plays = df_enriched[df_enriched['genre'].notna()].groupby('genre')['minutes_played'].sum()
+            genre_plays = genre_plays.sort_values(ascending=False).head(10)
+            fig_genre = px.bar(
+                y=genre_plays.index[::-1],
+                x=genre_plays.values[::-1],
+                orientation='h',
+                labels={'x': 'Minutes', 'y': 'Genre'},
+                color=genre_plays.values[::-1],
+                color_continuous_scale='oranges'
+            )
+            fig_genre.update_layout(showlegend=False)
+            st.plotly_chart(fig_genre, use_container_width=True)
 
-    with col2:
-        # Audio features radar
-        audio_features = ['danceability', 'energy', 'valence', 'acousticness']
-        avg_features = df_enriched[audio_features].mean()
-
-        fig_radar = go.Figure()
-        fig_radar.add_trace(go.Scatterpolar(
-            r=avg_features.values,
-            theta=audio_features,
-            fill='toself',
-            name='Average'
-        ))
-        fig_radar.update_layout(
-            polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
-            showlegend=False
-        )
-        st.plotly_chart(fig_radar, use_container_width=True)
+        with col2:
+            audio_features = ['danceability', 'energy', 'valence', 'acousticness']
+            if all(f in df_enriched.columns for f in audio_features):
+                avg_features = df_enriched[audio_features].mean()
+                fig_radar = go.Figure()
+                fig_radar.add_trace(go.Scatterpolar(
+                    r=avg_features.values,
+                    theta=audio_features,
+                    fill='toself',
+                    name='Average'
+                ))
+                fig_radar.update_layout(
+                    polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
+                    showlegend=False
+                )
+                st.plotly_chart(fig_radar, use_container_width=True)
 
     st.divider()
 
-    # Platform & weekend stats
     col1, col2 = st.columns(2)
 
     with col1:
@@ -384,17 +295,14 @@ if page == "Overview":
 elif page == "Explore":
     st.header("🔍 Explore Your Music")
 
-    # Search for artist
     search_artist = st.text_input("Search for an artist", "")
 
     if search_artist:
-        # Filter artists
         matching_artists = df[df['artist_name'].str.contains(search_artist, case=False, na=False)]['artist_name'].unique()
 
         if len(matching_artists) > 0:
             selected_artist = st.selectbox("Select artist", matching_artists)
 
-            # Artist stats
             artist_df = df[df['artist_name'] == selected_artist]
 
             col1, col2, col3 = st.columns(3)
@@ -404,7 +312,6 @@ elif page == "Explore":
 
             st.divider()
 
-            # Top tracks by this artist
             st.subheader(f"🎵 Top Tracks by {selected_artist}")
             artist_tracks = artist_df.groupby('track_name').agg({
                 'minutes_played': 'sum',
@@ -422,44 +329,20 @@ elif page == "Explore":
                 use_container_width=True
             )
 
-            # Listening timeline
-            st.subheader("📈 Listening Over Time")
-            monthly = artist_df.groupby(artist_df['ts'].dt.to_period('M'))['minutes_played'].sum()
-            fig_monthly = px.line(
-                x=[str(x) for x in monthly.index],
-                y=monthly.values,
-                labels={'x': 'Month', 'y': 'Minutes'}
-            )
-            fig_monthly.update_traces(line_color='#1DB954')
-            st.plotly_chart(fig_monthly, use_container_width=True)
-
-        else:
-            st.warning("No artists found matching your search.")
-
 
 elif page == "For You":
     st.header("💡 Personalized Recommendations")
 
-    st.markdown("""
-    Based on your listening patterns, here are some recommendations:
-    """)
-
-    # Get top genres and artists for recommendations
-    top_genres = df_enriched[df_enriched['genre'].notna()].groupby('genre')['minutes_played'].sum().sort_values(ascending=False).head(5)
-    top_artists_list = df['artist_name'].value_counts().head(10).index.tolist()
-
-    # Recommendation types
     rec_type = st.selectbox(
         "Choose recommendation type",
         ["Rediscover Old Favorites", "Similar Artists", "New Discoveries",
          "Session Buddies", "Weekend Vibes", "Night Owl Picks"]
     )
 
+    top_artists_list = df['artist_name'].value_counts().head(10).index.tolist()
+
     if rec_type == "Rediscover Old Favorites":
         st.subheader("🔄 Rediscover Old Favorites")
-        st.markdown("Tracks you loved but haven't listened to recently.")
-
-        # Get tracks from 2014-2018 that were popular
         old_tracks = df[(df['year'] >= 2014) & (df['year'] <= 2018)]
         old_favorites = old_tracks.groupby(['track_name', 'artist_name']).size().sort_values(ascending=False).head(10)
 
@@ -468,104 +351,73 @@ elif page == "For You":
 
     elif rec_type == "Similar Artists":
         st.subheader("🎤 Similar Artists")
-        st.markdown("Artists similar to your top favorites.")
-
-        # Simple similarity based on co-occurrence
         similar = {}
         for artist in top_artists_list[:5]:
-            # Find other artists commonly listened together
             artist_listeners = df[df['artist_name'] == artist]['track_name'].unique()
             co_listeners = df[df['track_name'].isin(artist_listeners)]['artist_name'].value_counts()
             for other_artist, count in co_listeners.items():
                 if other_artist != artist:
                     similar[(artist, other_artist)] = similar.get((artist, other_artist), 0) + count
 
-        # Show top similar
         similar_sorted = sorted(similar.items(), key=lambda x: x[1], reverse=True)[:10]
-
         for (original, similar_artist), count in similar_sorted:
             st.write(f"→ If you like **{original}**, try: **{similar_artist}**")
 
     elif rec_type == "New Discoveries":
         st.subheader("🆕 New Discoveries")
-        st.markdown("Artists you've barely explored but might love.")
-
-        # Artists with few plays but high engagement potential (popular in library)
-        artist_plays = df['artist_name'].value_counts()
-        library_popular = library_df.groupby('artist_name')['popularity'].mean().sort_values(ascending=False)
-
-        # Find artists you listen to less but are popular
-        recommendations = []
-        for artist in library_popular.head(100).index:
-            if artist.lower() not in [a.lower() for a in df['artist_name'].unique()]:
-                recommendations.append(artist)
-            if len(recommendations) >= 10:
-                break
-
-        for i, artist in enumerate(recommendations, 1):
-            st.write(f"{i}. **{artist}** (popularity: {library_popular[artist]:.0f})")
+        if 'popularity' in df_enriched.columns:
+            artist_plays = df['artist_name'].value_counts()
+            library_popular = df_enriched.groupby('artist_name')['popularity'].mean().sort_values(ascending=False)
+            recommendations = []
+            for artist in library_popular.head(100).index:
+                if artist.lower() not in [a.lower() for a in df['artist_name'].unique()]:
+                    recommendations.append(artist)
+                if len(recommendations) >= 10:
+                    break
+            for i, artist in enumerate(recommendations, 1):
+                st.write(f"{i}. **{artist}**")
+        else:
+            st.write("Upload music library for this feature")
 
     elif rec_type == "Session Buddies":
         st.subheader("👥 Session Buddies")
-        st.markdown("Perfect for long listening sessions.")
-
-        # Long tracks (>5 min) from your top artists
         long_plays = df[df['ms_played'] > 5 * 60 * 1000]
         session_tracks = long_plays.groupby(['track_name', 'artist_name']).size().sort_values(ascending=False).head(10)
-
         for i, ((track, artist), plays) in enumerate(session_tracks.items(), 1):
             st.write(f"{i}. **{track}** - {artist}")
 
     elif rec_type == "Weekend Vibes":
         st.subheader("🎉 Weekend Vibes")
-        st.markdown("Perfect for your weekend listening.")
-
         weekend_df = df[df['is_weekend']]
-        weekend_genres = df_enriched[df_enriched['genre'].notna() & df_enriched['date'].isin(weekend_df['date'])]
-        weekend_top = weekend_genres.groupby('genre')['minutes_played'].sum().sort_values(ascending=False).head(5)
-
-        st.write("Your top weekend genres:")
-        for genre, mins in weekend_top.items():
-            st.write(f"- **{genre}**: {mins:.0f} minutes")
-
-        st.write("\nTop weekend tracks:")
         weekend_tracks = weekend_df.groupby(['track_name', 'artist_name']).size().sort_values(ascending=False).head(5)
         for i, ((track, artist), plays) in enumerate(weekend_tracks.items(), 1):
             st.write(f"{i}. **{track}** - {artist} ({plays} plays)")
 
     elif rec_type == "Night Owl Picks":
         st.subheader("🦉 Night Owl Picks")
-        st.markdown("Your late-night favorites.")
-
         night_df = df[df['time_bucket'] == 'Night']
         night_tracks = night_df.groupby(['track_name', 'artist_name']).size().sort_values(ascending=False).head(10)
-
         for i, ((track, artist), plays) in enumerate(night_tracks.items(), 1):
             st.write(f"{i}. **{track}** - {artist}")
 
     st.divider()
 
-    # Mood filters
     st.subheader("🎛️ Filter by Mood")
+    if all(f in df_enriched.columns for f in ['energy', 'valence']):
+        mood = st.select_slider("Choose your mood", options=["Chill", "Neutral", "Energetic"])
 
-    mood = st.select_slider(
-        "Choose your mood",
-        options=["Chill", "Neutral", "Energetic"]
-    )
-
-    if mood == "Chill":
-        chill_tracks = df_enriched[df_enriched['energy'] < 0.4].nlargest(10, 'valence')
-        st.write("**Chill recommendations:**")
-        for _, row in chill_tracks.iterrows():
-            st.write(f"- {row['track_name']} - {row['artist_name']}")
-    elif mood == "Energetic":
-        energy_tracks = df_enriched[df_enriched['energy'] > 0.7].nlargest(10, 'danceability')
-        st.write("**High energy recommendations:**")
-        for _, row in energy_tracks.iterrows():
-            st.write(f"- {row['track_name']} - {row['artist_name']}")
+        if mood == "Chill":
+            chill_tracks = df_enriched[df_enriched['energy'] < 0.4].nlargest(10, 'valence')
+            st.write("**Chill recommendations:**")
+            for _, row in chill_tracks.iterrows():
+                st.write(f"- {row['track_name']} - {row['artist_name']}")
+        elif mood == "Energetic":
+            energy_tracks = df_enriched[df_enriched['energy'] > 0.7].nlargest(10, 'danceability')
+            st.write("**High energy recommendations:**")
+            for _, row in energy_tracks.iterrows():
+                st.write(f"- {row['track_name']} - {row['artist_name']}")
     else:
-        st.write("Balanced recommendations based on your overall listening.")
+        st.write("Upload music library for mood-based recommendations")
 
-# Footer
 st.markdown("---")
-st.caption("🎧 Built with Streamlit • Data from Spotify Extended Streaming History")
+st.caption("🎧 Built with Streamlit")
