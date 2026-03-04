@@ -9,6 +9,8 @@ from collections import Counter
 import glob
 import json
 import hashlib
+import os
+import tempfile
 
 # Page config
 st.set_page_config(
@@ -18,8 +20,71 @@ st.set_page_config(
 )
 
 @st.cache_data
+def load_data_from_upload(uploaded_files):
+    """Load and process Spotify streaming history from uploaded files"""
+
+    all_data = []
+
+    # Handle both uploaded files and local files
+    for uploaded_file in uploaded_files:
+        content = uploaded_file.getvalue().decode('utf-8')
+        for obj in content.split(']['):
+            try:
+                if not obj.startswith('['):
+                    obj = '[' + obj
+                if not obj.endswith(']'):
+                    obj = obj + ']'
+                data = json.loads(obj)
+                all_data.extend(data)
+            except:
+                pass
+
+    df = pd.DataFrame(all_data)
+
+    # Parse timestamp
+    df['ts'] = pd.to_datetime(df['ts'])
+    df['year'] = df['ts'].dt.year
+    df['month'] = df['ts'].dt.month
+    df['hour'] = df['ts'].dt.hour
+    df['day_of_week'] = df['ts'].dt.dayofweek
+    df['date'] = df['ts'].dt.date
+    df['year_month'] = df['ts'].dt.to_period('M')
+
+    # Time of day
+    def get_time_bucket(hour):
+        if 5 <= hour < 12:
+            return 'Morning'
+        elif 12 <= hour < 17:
+            return 'Afternoon'
+        elif 17 <= hour < 21:
+            return 'Evening'
+        else:
+            return 'Night'
+
+    df['time_bucket'] = df['hour'].apply(get_time_bucket)
+    df['is_weekend'] = df['day_of_week'].isin([5, 6])
+
+    # Platform
+    df['is_mobile'] = df['platform'].str.contains('iOS|Android', case=False, na=False)
+    df['is_desktop'] = df['platform'].str.contains('Mac|Windows|Linux', case=False, na=False)
+
+    # Minutes played
+    df['minutes_played'] = df['ms_played'] / 1000 / 60
+
+    # Completion ratio
+    df['completion_ratio'] = df['ms_played'] / 180000  # Assuming 3 min avg song
+
+    # Clean track/artist names
+    df['track_name'] = df['master_metadata_track_name'].fillna('Unknown')
+    df['artist_name'] = df['master_metadata_album_artist_name'].fillna('Unknown')
+    df['album_name'] = df['master_metadata_album_album_name'].fillna('Unknown')
+
+    return df
+
+
+@st.cache_data
 def load_data():
-    """Load and process Spotify streaming history"""
+    """Load and process Spotify streaming history from local files"""
 
     all_data = []
 
@@ -81,10 +146,7 @@ def load_data():
 
     return df
 
-@st.cache_data
-def load_music_library():
-    """Load Kaggle music library for genre/enrichment"""
-    return pd.read_csv("master_music_library.csv")
+    return df
 
 @st.cache_data
 def get_genre_data(df, library_df):
@@ -113,11 +175,59 @@ st.title("🎧 My Spotify Wrapped")
 # Sidebar for navigation
 page = st.sidebar.radio("Go to", ["Overview", "Explore", "For You"])
 
+# File upload section
+st.sidebar.header("📁 Upload Your Data")
+
+st.sidebar.markdown("""
+**Required:**
+1. Download your [Spotify Extended Streaming History](https://www.spotify.com/account/privacy/)
+2. Upload the `Streaming_History_Audio_*.json` files
+
+**Optional:**
+- Upload `master_music_library.csv` for genre data
+""")
+
+uploaded_files = st.sidebar.file_uploader(
+    "Upload Spotify JSON files",
+    type="json",
+    accept_multiple_files=True
+)
+
+library_file = st.sidebar.file_uploader(
+    "Upload music library (optional, for genres)",
+    type="csv"
+)
+
+if not uploaded_files:
+    st.info("👈 Please upload your Spotify Extended Streaming History JSON files to get started!")
+    st.markdown("""
+    ### How to get your data:
+    1. Go to [Spotify Privacy Settings](https://www.spotify.com/account/privacy/)
+    2. Request your "Extended Streaming History"
+    3. Wait for the email (can take a few days)
+    4. Download and unzip the files
+    5. Upload the `Streaming_History_Audio_*.json` files here
+    """)
+    st.stop()
+
 # Load data
-with st.spinner("Loading your listening data..."):
-    df = load_data()
-    library_df = load_music_library()
-    df_enriched = get_genre_data(df, library_df)
+with st.spinner("Processing your listening data..."):
+    df = load_data_from_upload(uploaded_files)
+
+    if library_file:
+        library_df = pd.read_csv(library_file)
+    else:
+        # Use a small built-in sample or skip genre enrichment
+        library_df = pd.DataFrame()
+
+    if df is None or len(df) == 0:
+        st.error("No data loaded. Please check your files.")
+        st.stop()
+
+    if not library_df.empty:
+        df_enriched = get_genre_data(df, library_df)
+    else:
+        df_enriched = df.copy()
 
 if page == "Overview":
     st.header("📊 Your Listening Overview")
