@@ -56,9 +56,18 @@ def load_data_from_upload(uploaded_files, library_file):
     df['is_weekend'] = df['day_of_week'].isin([5, 6])
     df['is_mobile'] = df['platform'].str.contains('iOS|Android', case=False, na_fill=False)
     df['minutes_played'] = df['ms_played'] / 1000 / 60
-    df['track_name'] = df['master_metadata_track_name'].fillna('Unknown').astype(str)
-    df['artist_name'] = df['master_metadata_album_artist_name'].fillna('Unknown').astype(str)
-    df['album_name'] = df['master_metadata_album_album_name'].fillna('Unknown').astype(str)
+
+    # Coalesce track and podcast fields
+    df['track_name'] = df['master_metadata_track_name'].fillna(df['episode_name']).fillna('Unknown').astype(str)
+    df['artist_name'] = df['master_metadata_album_artist_name'].fillna(df['episode_show_name']).fillna('Unknown').astype(str)
+    df['album_name'] = df['master_metadata_album_album_name'].fillna(df['episode_name']).fillna('Unknown').astype(str)
+
+    # Track content type
+    df['content_type'] = df.apply(
+        lambda x: 'podcast' if pd.isna(x['master_metadata_track_name']) and pd.notna(x['episode_name'])
+        else ('audiobook' if pd.isna(x['master_metadata_track_name']) and pd.notna(x.get('audiobook_title'))
+        else 'music'), axis=1
+    )
 
     # Load library if provided
     library_df = None
@@ -157,6 +166,31 @@ if page == "Overview":
     col2.metric("Total Plays", f"{total_plays:,}")
     col3.metric("Unique Artists", f"{unique_artists:,}")
     col4.metric("Unique Tracks", f"{unique_tracks:,}")
+
+    # Content type filter
+    if 'content_type' in df.columns:
+        content_filter = st.radio(
+            "Content type",
+            ["All", "Music only", "Podcasts only"],
+            horizontal=True,
+            index=0
+        )
+        if content_filter == "Music only":
+            df = df[df['content_type'] == 'music']
+        elif content_filter == "Podcasts only":
+            df = df[df['content_type'] == 'podcast']
+
+        # Recalculate KPIs after filter
+        total_hours = df['minutes_played'].sum() / 60
+        total_plays = len(df)
+        unique_artists = df['artist_name'].nunique()
+        unique_tracks = df['track_name'].nunique()
+
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Hours (filtered)", f"{total_hours:,.0f}")
+        col2.metric("Plays (filtered)", f"{total_plays:,}")
+        col3.metric("Artists (filtered)", f"{unique_artists:,}")
+        col4.metric("Tracks (filtered)", f"{unique_tracks:,}")
 
     st.caption(f"Listening history: {df['date'].min()} to {df['date'].max()}")
 
