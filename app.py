@@ -140,6 +140,10 @@ else:
         library_df = pd.read_csv(library_file) if library_file else pd.DataFrame()
         df_enriched = get_genre_data(df, library_df)
 
+    # Clean data
+    df['artist_name'] = df['artist_name'].fillna('Unknown').astype(str)
+    df['track_name'] = df['track_name'].fillna('Unknown').astype(str)
+
 # Sidebar for navigation
 page = st.sidebar.radio("Go to", ["Overview", "Explore", "For You"])
 
