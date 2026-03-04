@@ -171,29 +171,32 @@ if page == "Overview":
     col4.metric("Unique Tracks", f"{unique_tracks:,}")
 
     # Content type filter
-    if 'content_type' in df.columns:
-        content_filter = st.radio(
-            "Content type",
-            ["All", "Music only", "Podcasts only"],
-            horizontal=True,
-            index=0
-        )
-        if content_filter == "Music only":
-            df = df[df['content_type'] == 'music']
-        elif content_filter == "Podcasts only":
-            df = df[df['content_type'] == 'podcast']
+    try:
+        if 'content_type' in df.columns:
+            content_filter = st.radio(
+                "Content type",
+                ["All", "Music only", "Podcasts only"],
+                horizontal=True,
+                index=0
+            )
+            if content_filter == "Music only":
+                df = df[df['content_type'] == 'music']
+            elif content_filter == "Podcasts only":
+                df = df[df['content_type'] == 'podcast']
 
-        # Recalculate KPIs after filter
-        total_hours = df['minutes_played'].sum() / 60
-        total_plays = len(df)
-        unique_artists = df['artist_name'].nunique()
-        unique_tracks = df['track_name'].nunique()
+            # Recalculate KPIs after filter
+            total_hours = df['minutes_played'].sum() / 60
+            total_plays = len(df)
+            unique_artists = df['artist_name'].nunique()
+            unique_tracks = df['track_name'].nunique()
 
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Hours (filtered)", f"{total_hours:,.0f}")
-        col2.metric("Plays (filtered)", f"{total_plays:,}")
-        col3.metric("Artists (filtered)", f"{unique_artists:,}")
-        col4.metric("Tracks (filtered)", f"{unique_tracks:,}")
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Hours (filtered)", f"{total_hours:,.0f}")
+            col2.metric("Plays (filtered)", f"{total_plays:,}")
+            col3.metric("Artists (filtered)", f"{unique_artists:,}")
+            col4.metric("Tracks (filtered)", f"{unique_tracks:,}")
+    except Exception as e:
+        st.warning(f"Content filter unavailable: {e}")
 
     st.caption(f"Listening history: {df['date'].min()} to {df['date'].max()}")
 
