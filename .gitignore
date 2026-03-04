@@ -1,0 +1,11 @@
+# Data files (too large for git)
+*.csv
+*.json
+Spotify\ Extended\ Streaming\ History/
+master_music_library.csv
+
+# Python
+__pycache__/
+*.pyc
+.env
+venv/
