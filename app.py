@@ -54,7 +54,7 @@ def load_data_from_upload(uploaded_files, library_file):
 
     df['time_bucket'] = df['hour'].apply(get_time_bucket)
     df['is_weekend'] = df['day_of_week'].isin([5, 6])
-    df['is_mobile'] = df['platform'].str.contains('iOS|Android', case=False, na_fill=False)
+    df['is_mobile'] = df['platform'].str.contains('iOS|Android', case=False, na=False)
     df['minutes_played'] = df['ms_played'] / 1000 / 60
 
     # Coalesce track and podcast fields
