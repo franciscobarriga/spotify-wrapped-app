@@ -20,8 +20,8 @@ st.set_page_config(
 def load_demo_data():
     """Load pre-processed demo data"""
     df = pd.read_csv("my_spotify_data.csv")
-    df['ts'] = pd.to_datetime(df['ts'])
-    df['date'] = pd.to_datetime(df['date']).dt.date
+    df['ts'] = pd.to_datetime(df['ts'], errors='coerce')
+    df['date'] = pd.to_datetime(df['date'], errors='coerce').dt.date
     return df
 
 @st.cache_data
@@ -158,7 +158,12 @@ if page == "Overview":
     col3.metric("Unique Artists", f"{unique_artists:,}")
     col4.metric("Unique Tracks", f"{unique_tracks:,}")
 
-    st.caption(f"📅 Listening history: {df['date'].min()} to {df['date'].max()}")
+    # Safe date range display
+    try:
+        date_range = f"{df['date'].min()} to {df['date'].max()}"
+    except:
+        date_range = "All time"
+    st.caption(f"Listening history: {date_range}")
 
     st.divider()
 
@@ -298,6 +303,8 @@ elif page == "Explore":
     search_artist = st.text_input("Search for an artist", "")
 
     if search_artist:
+        # Convert to string to handle any dtype issues
+        df['artist_name'] = df['artist_name'].astype(str)
         matching_artists = df[df['artist_name'].str.contains(search_artist, case=False, na=False)]['artist_name'].unique()
 
         if len(matching_artists) > 0:
