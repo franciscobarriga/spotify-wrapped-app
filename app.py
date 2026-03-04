@@ -64,8 +64,10 @@ def load_data_from_upload(uploaded_files, library_file):
 
     # Track content type (vectorized for performance)
     df['content_type'] = 'music'
-    df.loc[df['master_metadata_track_name'].isna() & df['episode_name'].notna(), 'content_type'] = 'podcast'
-    df.loc[df['master_metadata_track_name'].isna() & df['audiobook_title'].notna(), 'content_type'] = 'audiobook'
+    if 'episode_name' in df.columns:
+        df.loc[df['master_metadata_track_name'].isna() & df['episode_name'].notna(), 'content_type'] = 'podcast'
+    if 'audiobook_title' in df.columns:
+        df.loc[df['master_metadata_track_name'].isna() & df['audiobook_title'].notna(), 'content_type'] = 'audiobook'
 
     # Load library if provided
     library_df = None
