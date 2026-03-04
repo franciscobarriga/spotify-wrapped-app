@@ -62,16 +62,6 @@ def load_data_from_upload(uploaded_files, library_file):
     df['artist_name'] = df['master_metadata_album_artist_name'].fillna(df['episode_show_name']).fillna('Unknown').astype(str)
     df['album_name'] = df['master_metadata_album_album_name'].fillna(df['episode_name']).fillna('Unknown').astype(str)
 
-    # Track content type (vectorized for performance)
-    try:
-        df['content_type'] = 'music'
-        if 'episode_name' in df.columns:
-            df.loc[df['master_metadata_track_name'].isna() & df['episode_name'].notna(), 'content_type'] = 'podcast'
-        if 'audiobook_title' in df.columns:
-            df.loc[df['master_metadata_track_name'].isna() & df['audiobook_title'].notna(), 'content_type'] = 'audiobook'
-    except Exception as e:
-        df['content_type'] = 'music'
-
     # Load library if provided
     library_df = None
     if library_file:
@@ -130,7 +120,6 @@ if not uploaded_files:
     5. Upload the `Streaming_History_Audio_*.json` files here
     """)
 
-    # Show sample structure
     st.markdown("---")
     st.markdown("### 📊 Sample App Preview")
     st.markdown("Once you upload your data, you'll see:")
@@ -139,7 +128,6 @@ if not uploaded_files:
     st.markdown("- Time of day distribution")
     st.markdown("- Top artists and tracks")
     st.markdown("- Genre breakdown (if library provided)")
-    st.markdown("- Audio features (danceability, energy, valence)")
     st.markdown("- Platform and weekend stats")
     st.markdown("- Artist exploration")
     st.markdown("- Personalized recommendations")
