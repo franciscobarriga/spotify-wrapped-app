@@ -106,7 +106,7 @@ uploaded_files = st.sidebar.file_uploader(
 library_file = st.sidebar.file_uploader(
     "Upload music library CSV (optional, for genres)",
     type=['csv'],
-    help="Upload master_music_library.csv for genre data"
+    help="Upload a smaller CSV with genre data. App works without it!"
 )
 
 if not uploaded_files:
