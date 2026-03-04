@@ -1,4 +1,4 @@
-# Large data files (except demo data)
+# Large JSON files
 *.json
 Spotify Extended Streaming History/
 master_music_library.csv
